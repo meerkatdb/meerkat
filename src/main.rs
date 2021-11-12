@@ -21,6 +21,7 @@ use server::Config;
 
 mod server;
 mod build;
+mod store;
 
 #[derive(Debug, StructOpt)]
 struct Args {
