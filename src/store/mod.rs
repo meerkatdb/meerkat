@@ -12,3 +12,4 @@
 // limitations under the License.
 
 mod io;
+mod indexing_buffer;
