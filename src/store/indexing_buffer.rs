@@ -1,0 +1,507 @@
+// Copyright 2021 The Meerkat Authors
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! This module provides specialized buffer implementations that are used
+//! to store column values in memory until they are flushed to disk.
+//!
+//! Column values are stored in a sparse representation, only non-null values
+//! are stored and validity data is encoded using an internal bitmap.
+
+const BIT_MASK: [u8; 8] = [1, 2, 4, 8, 16, 32, 64, 128];
+const INITIAL_BITMAP_CAP: usize = 1024;
+
+pub type Int32Buffer = PrimitiveBuffer<i32>;
+pub type Int64Buffer = PrimitiveBuffer<i64>;
+pub type Uint64Buffer = PrimitiveBuffer<u64>;
+pub type Float64Buffer = PrimitiveBuffer<f64>;
+
+
+/// A reusable growable bitmap.
+struct Bitmap {
+    values: Vec<u8>,
+    len: usize,
+}
+
+
+impl Bitmap {
+    pub fn new() -> Self {
+        Self {
+            values: vec![0; INITIAL_BITMAP_CAP],
+            len: 0,
+        }
+    }
+
+    pub fn with_capacity(cap: usize) -> Self {
+        Self {
+            values: vec![0; cap >> 3],
+            len: 0,
+        }
+    }
+
+    pub fn append(&mut self, set: bool) {
+        let idx = self.len >> 3;
+
+        if idx == self.values.len() {
+            self.values.resize(self.values.len() * 2, 0);
+        }
+
+        if set {
+            self.values[idx] |= BIT_MASK[self.len & 7];
+        }
+
+        self.len += 1;
+    }
+
+    pub fn is_set(&self, idx: usize) -> bool {
+        assert!(idx < self.len);
+        (self.values[idx >> 3] & BIT_MASK[idx & 7]) != 0
+    }
+
+    pub fn len(&self) -> usize { self.len }
+
+    pub fn clear(&mut self) {
+        self.len = 0;
+        self.values.resize(INITIAL_BITMAP_CAP, 0);
+    }
+}
+
+/// A growable sparse encoded buffer for primitive values.
+/// Non-null values are stores sequentially, Nulls are encoded using a bitmap.
+pub struct PrimitiveBuffer<T> {
+    values: Vec<T>,
+    validity: Option<Bitmap>,
+    len: usize,
+}
+
+impl<T> PrimitiveBuffer<T> {
+    pub fn new(nullable: bool) -> Self {
+        let validity = match nullable {
+            true => Some(Bitmap::new()),
+            false => None,
+        };
+
+        Self {
+            values: Vec::new(),
+            len: 0,
+            validity: validity,
+        }
+    }
+
+    /// Append a non-null value to the buffer
+    pub fn append(&mut self, value: T) {
+        self.values.push(value);
+        if let Some(ref mut validity) = self.validity {
+            validity.append(true);
+        }
+        self.len += 1;
+    }
+
+    /// Append a null value to the buffer.
+    /// This methos will panic if the buffer is not nullable.
+    pub fn append_null(&mut self) {
+        match self.validity {
+            Some(ref mut validity) => validity.append(false),
+            None => panic!("null append on non-nullable buffer")
+        }
+        self.len += 1;
+    }
+
+    /// Returns the values stored in this buffer.
+    /// This is a sparse representation so only non-null values are returned.
+    pub fn values(&self) -> &[T] {
+        &self.values
+    }
+
+    /// Returns a ref to the validity bitmap.
+    /// Panic if the buffer is not nullable.
+    pub fn validity(&self) -> &Bitmap {
+        &self.validity.as_ref().unwrap()
+    }
+
+    /// Returns the number of items stored in the buffer including null values.
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
+    /// Returns true if the buffer accepts non-null values.
+    pub fn is_nullable(&self) -> bool {
+        self.validity.is_some()
+    }
+
+    /// Return true if the buffer contains nulls values.
+    pub fn has_nulls(&self) -> bool {
+        !(self.values.len() == self.len)
+    }
+
+    /// Clear all existing data from this buffer.
+    pub fn clear(&mut self) {
+        self.len = 0;
+        self.values.clear();
+        if let Some(ref mut validity) = self.validity {
+            validity.clear();
+        }
+    }
+}
+
+/// A growable sparse encoded buffer for binary types.
+/// Buffer items are stored sequentially and offsets to each item are stored
+/// in a separated offset buffer.
+pub struct BinaryBuffer {
+    values: Vec<u8>,
+    offsets: Vec<usize>,
+    validity: Option<Bitmap>,
+    len: usize,
+}
+
+impl BinaryBuffer {
+    pub fn new(nullable: bool) -> Self {
+        let validity = match nullable {
+            true => Some(Bitmap::new()),
+            false => None,
+        };
+
+        Self {
+            values: Vec::new(),
+            offsets: vec![0; 1],
+            len: 0,
+            validity: validity,
+        }
+    }
+
+    /// Append a non-null value.
+    pub fn append(&mut self, value: &[u8]) {
+        self.values.extend_from_slice(value);
+        self.offsets.push(self.values.len());
+        if let Some(ref mut validity) = self.validity {
+            validity.append(true);
+        }
+        self.len += 1;
+    }
+
+    /// Append a null value to the buffer.
+    pub fn append_null(&mut self) {
+        match self.validity {
+            Some(ref mut validity) => validity.append(false),
+            None => panic!("null append on non-nullable buffer")
+        }
+        self.len += 1;
+    }
+
+    /// Returns a reference to the stored values.
+    pub fn values(&self) -> &[u8] {
+        self.values.as_slice()
+    }
+
+    /// Returns a slice containing the values offsets
+    pub fn offsets(&self) -> &[usize] {
+        self.offsets.as_slice()
+    }
+
+    /// Returns a ref to the validity bitmap.
+    /// Panic if the buffer is not nullable.
+    pub fn validity(&self) -> &Bitmap {
+        &self.validity.as_ref().unwrap()
+    }
+
+    /// The number of items stored in this buffer. ( including non-null )
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
+    /// Returns true if the buffer accepts non-null values.
+    pub fn is_nullable(&self) -> bool {
+        self.validity.is_some()
+    }
+
+    /// Returns true if the buffer has null items.
+    pub fn has_nulls(&self) -> bool {
+        !(self.offsets.len() - 1 == self.len)
+    }
+
+    /// Clear all existing data from this buffer.
+    pub fn clear(&mut self) {
+        self.len = 0;
+        self.values.clear();
+        self.offsets.truncate(1);
+        if let Some(ref mut validity) = self.validity {
+            validity.clear();
+        };
+    }
+}
+
+
+/// A growable sparse encoded buffer for bool values.
+pub struct BoolBuffer {
+    values: Bitmap,
+    validity: Option<Bitmap>,
+    len: usize,
+}
+
+impl BoolBuffer {
+    pub fn new(nullable: bool) -> Self {
+        let validity = match nullable {
+            true => Some(Bitmap::new()),
+            false => None,
+        };
+
+
+        Self {
+            values: Bitmap::new(),
+            validity: validity,
+            len: 0,
+        }
+    }
+
+    /// Append a new non-null value to the buffer.
+    pub fn append(&mut self, value: bool) {
+        self.values.append(value);
+        if let Some(ref mut validity) = self.validity {
+            validity.append(true);
+        };
+        self.len += 1;
+    }
+
+
+    /// Append a new value to the buffer.
+    pub fn append_null(&mut self) {
+        match self.validity {
+            Some(ref mut validity) => validity.append(false),
+            None => panic!("null append on non-nullable buffer")
+        };
+        self.len += 1;
+    }
+
+    /// Returns a reference to the internal value bitmap.
+    pub fn values(&self) -> &Bitmap {
+        &self.values
+    }
+
+    /// Returns a ref to the validity bitmap.
+    /// Panic if the buffer is not nullable.
+    pub fn validity(&self) -> &Bitmap {
+        &self.validity.as_ref().unwrap()
+    }
+
+    /// The number of items stored in this buffer. ( including non-null )
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
+    /// Returns true if the buffer accepts non-null values.
+    pub fn is_nullable(&self) -> bool {
+        self.validity.is_some()
+    }
+
+    /// Returns true if the buffer has null items.
+    pub fn has_nulls(&self) -> bool {
+        !(self.values.len() == self.len)
+    }
+
+    /// Clear all existing data from this buffer.
+    pub fn clear(&mut self) {
+        self.values.clear();
+        if let Some(ref mut validity) = self.validity {
+            validity.clear();
+        };
+        self.len = 0;
+    }
+}
+
+
+#[cfg(test)]
+mod test {
+    use rand::Rng;
+
+    use super::*;
+
+    #[test]
+    fn bitmap_rnd_test() {
+        let mut rng = rand::thread_rng();
+        let len = rng.gen_range(0..2048);
+        let mut values = vec![false; len];
+        rng.fill(values.as_mut_slice());
+
+        let mut bitmap = Bitmap::new();
+
+        for value in &values {
+            bitmap.append(*value);
+        }
+
+        for (i, value) in values.iter().enumerate() {
+            assert_eq!(bitmap.is_set(i), *value);
+        }
+
+        assert_eq!(bitmap.len(), values.len());
+    }
+
+    #[test]
+    fn test_primitive_buffer() {
+        let mut buffer: PrimitiveBuffer<i32> = PrimitiveBuffer::new(false);
+
+        buffer.append(1);
+        buffer.append(2);
+        buffer.append(3);
+
+        assert_eq!(buffer.len(), 3);
+        assert_eq!(buffer.values().len(), 3);
+        assert_eq!(buffer.is_nullable(), false);
+        assert_eq!(buffer.has_nulls(), false);
+
+        buffer.clear();
+
+        assert_eq!(buffer.len(), 0);
+        assert_eq!(buffer.values().len(), 0);
+        assert_eq!(buffer.is_nullable(), false);
+        assert_eq!(buffer.has_nulls(), false);
+    }
+
+    #[test]
+    fn test_primitive_nullable_buffer() {
+        let mut buffer: PrimitiveBuffer<i32> = PrimitiveBuffer::new(true);
+
+        buffer.append(1);
+        buffer.append(2);
+        buffer.append_null();
+        buffer.append_null();
+        buffer.append(3);
+
+        assert_eq!(buffer.len(), 5);
+        assert_eq!(buffer.values().len(), 3);
+        assert_eq!(buffer.is_nullable(), true);
+        assert_eq!(buffer.has_nulls(), true);
+
+        buffer.clear();
+
+        assert_eq!(buffer.len(), 0);
+        assert_eq!(buffer.values().len(), 0);
+        assert_eq!(buffer.is_nullable(), true);
+        assert_eq!(buffer.has_nulls(), false);
+
+        buffer.append(10);
+
+        assert_eq!(buffer.len(), 1);
+        assert_eq!(buffer.values().len(), 1);
+        assert_eq!(buffer.is_nullable(), true);
+        assert_eq!(buffer.has_nulls(), false);
+    }
+
+    #[test]
+    fn test_binary_buffer() {
+        let mut buffer = BinaryBuffer::new(false);
+
+        buffer.append("Liskov".as_bytes());
+        buffer.append("Lamport".as_bytes());
+        buffer.append("Gray".as_bytes());
+
+        assert_eq!(buffer.len(), 3);
+        assert_eq!(buffer.values().len(), 17);
+        assert_eq!(buffer.is_nullable(), false);
+        assert_eq!(buffer.has_nulls(), false);
+
+        let expected_offsets: Vec<usize> = vec![0, 6, 13, 17];
+        for (actual, expected) in buffer.offsets.iter().zip(expected_offsets.iter()) {
+            assert_eq!(actual, expected);
+        }
+
+        buffer.clear();
+
+        assert_eq!(buffer.len(), 0);
+        assert_eq!(buffer.values().len(), 0);
+        assert_eq!(buffer.is_nullable(), false);
+        assert_eq!(buffer.has_nulls(), false);
+
+        buffer.append("Naur".as_bytes());
+    }
+
+    #[test]
+    fn test_binary_nullable_buffer() {
+        let mut buffer = BinaryBuffer::new(true);
+
+        buffer.append("Liskov".as_bytes());
+        buffer.append_null();
+        buffer.append_null();
+        buffer.append("Lamport".as_bytes());
+        buffer.append_null();
+        buffer.append("Gray".as_bytes());
+
+        assert_eq!(buffer.len(), 6);
+        assert_eq!(buffer.values().len(), 17);
+        assert_eq!(buffer.is_nullable(), true);
+        assert_eq!(buffer.has_nulls(), true);
+
+        let expected_offsets: Vec<usize> = vec![0, 6, 13, 17];
+        for (actual, expected) in buffer.offsets.iter().zip(expected_offsets.iter()) {
+            assert_eq!(actual, expected);
+        }
+
+        buffer.clear();
+
+        assert_eq!(buffer.len(), 0);
+        assert_eq!(buffer.values().len(), 0);
+        assert_eq!(buffer.is_nullable(), true);
+        assert_eq!(buffer.has_nulls(), false);
+
+        buffer.append("Naur".as_bytes());
+    }
+
+    #[test]
+    fn test_boolean_buffer() {
+        let mut buffer = BoolBuffer::new(false);
+
+        buffer.append(true);
+        buffer.append(true);
+        buffer.append(false);
+        buffer.append(true);
+
+        assert_eq!(buffer.len(), 4);
+        assert_eq!(buffer.values().len(), 4);
+        assert_eq!(buffer.is_nullable(), false);
+        assert_eq!(buffer.has_nulls(), false);
+
+        buffer.clear();
+
+        assert_eq!(buffer.len(), 0);
+        assert_eq!(buffer.values().len(), 0);
+        assert_eq!(buffer.is_nullable(), false);
+        assert_eq!(buffer.has_nulls(), false);
+
+        buffer.append(true);
+    }
+
+    #[test]
+    fn test_boolean_nullable_buffer() {
+        let mut buffer = BoolBuffer::new(true);
+
+        buffer.append(true);
+        buffer.append(true);
+        buffer.append_null();
+        buffer.append_null();
+        buffer.append(false);
+        buffer.append_null();
+        buffer.append(true);
+
+        assert_eq!(buffer.len(), 7);
+        assert_eq!(buffer.values().len(), 4);
+        assert_eq!(buffer.is_nullable(), true);
+        assert_eq!(buffer.has_nulls(), true);
+
+        buffer.clear();
+
+        assert_eq!(buffer.len(), 0);
+        assert_eq!(buffer.values().len(), 0);
+        assert_eq!(buffer.is_nullable(), true);
+        assert_eq!(buffer.has_nulls(), false);
+
+        buffer.append(true);
+    }
+}
