@@ -35,15 +35,15 @@
 //! certain IO operations related to query or ingestion jobs over maintenance
 //! operations like segment merge.
 
-
 use std::io;
 
 use async_trait::async_trait;
 use futures::stream::BoxStream;
 use tokio::task::spawn_blocking;
 
-mod unix_disk_block_reader;
 mod default_block_writer;
+mod unix_disk_block_reader;
+pub use default_block_writer::Writer as BlockWriter;
 
 /// Block Read Operation.
 #[derive(Clone, Debug)]
@@ -96,10 +96,7 @@ pub trait BlockReader {
     type Buf: AsRef<[u8]>;
 
     /// Read a single block.
-    async fn read_block(
-        &self,
-        range: BlockRange,
-    ) -> io::Result<Self::Buf>;
+    async fn read_block(&self, range: BlockRange) -> io::Result<Self::Buf>;
 
     /// Read a batch of Blocks.
     /// Blocks are returned in the same order as read_ops
@@ -110,25 +107,11 @@ pub trait BlockReader {
     fn len(&self) -> u64;
 }
 
-/// BlockWriter writes blocks sequentially to a segment file.
-#[async_trait]
-pub trait BlockWriter {
-    /// Write a single block to disk.
-    async fn write_block(&mut self, block: &[u8]) -> io::Result<()>;
-    /// Wait for pending operations and flushes all internal buffers.
-    async fn flush(&mut self) -> io::Result<()>;
-    /// Sync all OS-internal metadata to disk.
-    /// This function will attempt to ensure that all in-core data reaches
-    /// the filesystem before returning.
-    async fn sync(&mut self) -> io::Result<()>;
-}
-
-
 /// Helper fn brought from tokio::fs to asyncify some IO operations.
 async fn asyncify<F, T>(f: F) -> io::Result<T>
-    where
-        F: FnOnce() -> io::Result<T> + Send + 'static,
-        T: Send + 'static,
+where
+    F: FnOnce() -> io::Result<T> + Send + 'static,
+    T: Send + 'static,
 {
     match spawn_blocking(f).await {
         Ok(res) => res,
@@ -138,7 +121,6 @@ async fn asyncify<F, T>(f: F) -> io::Result<T>
         )),
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -168,7 +150,9 @@ mod tests {
 
         let mut io_ops: Vec<ReadOp> = Vec::new();
 
-        let mut block_writer = default_block_writer::Writer::new(&tmp_file_path).await.unwrap();
+        let mut block_writer = default_block_writer::Writer::new(&tmp_file_path)
+            .await
+            .unwrap();
         let mut last_offset = 0;
         for (i, block_data) in blocks_list.iter().enumerate() {
             io_ops.push(ReadOp {
@@ -176,7 +160,9 @@ mod tests {
                     start: last_offset,
                     end: last_offset + block_data.len() as u64,
                 },
-                op_info: OpInfo::DataBlock { first_row_id: i as u32 },
+                op_info: OpInfo::DataBlock {
+                    first_row_id: i as u32,
+                },
             });
             last_offset += block_data.len() as u64;
             block_writer.write_block(&block_data).await.unwrap();
@@ -184,7 +170,9 @@ mod tests {
 
         block_writer.flush().await.unwrap();
 
-        let block_reader = unix_disk_block_reader::Reader::new(&tmp_file_path).await.unwrap();
+        let block_reader = unix_disk_block_reader::Reader::new(&tmp_file_path)
+            .await
+            .unwrap();
 
         let mut block_stream = block_reader.read_blocks(io_ops.to_owned());
 
@@ -196,11 +184,15 @@ mod tests {
             let block_data = block_iter.next().unwrap();
             let block = io_result.unwrap();
             assert_eq!(io_op.op_info, block.op_info, "op_info doesn't match");
-            assert_eq!(block.buf.len(), block_data.len(), "block data len doesn't match");
+            assert_eq!(
+                block.buf.len(),
+                block_data.len(),
+                "block data len doesn't match"
+            );
             for (actual, expected) in block.buf.iter().zip(block_data.iter()) {
                 assert_eq!(actual, expected, "block data doesn't match");
             }
-        };
+        }
 
         assert!(io_op_iter.next().is_none());
         assert!(block_iter.next().is_none());

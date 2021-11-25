@@ -1,0 +1,124 @@
+// Copyright 2021 The Meerkat Authors
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+
+syntax = "proto3";
+package segment_metadata;
+
+// The logical column type
+enum ColumnType {
+  BOOL      = 0;
+  DATETIME  = 1;
+  DECIMAL   = 2;
+  DYNAMIC   = 3;
+  FLOAT64   = 4;
+  GUID      = 5;
+  INT32     = 6;
+  INT64     = 7;
+  STRING    = 8;
+  TIMESPAN  = 9;
+}
+
+enum Encoding{
+  PLAIN               = 0;
+  BIT_PACKED          = 1;
+  DELTA_BINARY_PACKED = 2;
+  RLE_DICTIONARY      = 3;
+  SNAPPY              = 4;
+}
+
+enum IndexType{
+  NO_INDEX  = 0;
+  FULL_TEXT = 1;
+  BRIN      = 2;
+  KDTREE    = 3;
+}
+
+message Int32Stats {}
+message Int64Stats {}
+message Float64Stats {}
+message StringStats {}
+
+
+message ColumnMeta {
+
+  string      name              = 1;
+  ColumnType  column_type       = 2;
+  bool        nullable          = 3;
+  Encoding    encoding          = 4;
+  uint32       cardinality      = 8;
+  IndexType   index_type        = 5;
+  uint32      num_values        = 6;
+  uint32      num_nulls         = 7;
+  uint64      compressed_size   = 9;
+  uint64      uncompressed_size = 10;
+
+  oneof stats {
+    Int32Stats   int32_stats   = 11;
+    Int64Stats   int64_stats   = 12;
+    Float64Stats float64_stats = 13;
+    StringStats  string_stats  = 14;
+  };
+
+}
+
+message SegmentMeta {
+  bytes                   segment_id                   = 1;
+  string                  database_name                = 2;
+  string                  table_name                   = 3;
+  uint32                  shard_id                     = 4;
+  uint64                  compressed_size              = 5;
+  uint64                  uncompressed_size            = 6;
+  uint32                  num_rows                     = 7;
+  map<string, ColumnMeta> columns_meta                 = 8;
+}
+
+message Range {
+  uint64 start = 1;
+  uint64 end = 2;
+}
+
+message Metadata{
+  SegmentMeta segment_meta =1;
+  map<string,ColumnLayout> columns_layout = 2;
+}
+
+message StringIndexV1 {
+  Range range = 1;
+}
+
+message BlockIndexLayout {
+  Range range = 1;
+}
+
+message BinaryRleDict {
+  Range range = 1;
+}
+
+message NoIndex {}
+message NoLayout {}
+
+message ColumnLayout{
+
+  oneof ColumnIndexLayout {
+    NoIndex no_index              = 1;
+    StringIndexV1 string_index_v1 = 2;
+  }
+
+  BlockIndexLayout block_index_layout = 3;
+
+  oneof EncoderLayout{
+    NoLayout plain            = 4;
+    BinaryRleDict binary_dict = 5;
+    NoLayout snappy           = 6;
+  }
+
+}

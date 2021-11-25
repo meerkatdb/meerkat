@@ -18,8 +18,8 @@ use std::path::Path;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::stream::BoxStream;
 use futures::stream::iter;
+use futures::stream::BoxStream;
 use futures::StreamExt;
 
 use crate::store::io::{Block, BlockError, BlockRange, BlockReader, ReadOp};
@@ -42,19 +42,16 @@ pub struct Reader {
     len: u64,
 }
 
-
 impl Reader {
     pub async fn new<P: AsRef<Path>>(path: P) -> io::Result<Self> {
         let path = path.as_ref().to_owned();
         let file = asyncify(|| File::open(path)).await?;
         let metadata = file.metadata()?;
 
-        Ok(
-            Reader {
-                file: Arc::new(file),
-                len: metadata.len(),
-            }
-        )
+        Ok(Reader {
+            file: Arc::new(file),
+            len: metadata.len(),
+        })
     }
 }
 
@@ -62,49 +59,38 @@ impl Reader {
 impl BlockReader for Reader {
     type Buf = Vec<u8>;
 
-
     async fn read_block(&self, range: BlockRange) -> io::Result<Self::Buf> {
         let file = self.file.clone();
         asyncify(move || {
             let buf_len = range.end - range.start;
             let mut buf: Vec<u8> = vec![0; buf_len as usize];
-            file.
-                read_exact_at(buf.as_mut_slice(), range.start).
-                map(|_| buf)
-        }).await
+            file.read_exact_at(buf.as_mut_slice(), range.start)
+                .map(|_| buf)
+        })
+        .await
     }
-
 
     fn read_blocks(
         &self,
         read_ops: Vec<ReadOp>,
     ) -> BoxStream<'_, Result<Block<Self::Buf>, BlockError>> {
-        iter(read_ops).
-            map(move |op| async move {
-                (self.read_block(op.block_range.to_owned()).await, op)
-            }).
-            buffered(BLOCK_BUFFER_SIZE).
-            map(|op_result| {
-                match op_result.0 {
-                    Ok(buf) => Ok(
-                        Block {
-                            buf: buf,
-                            op_info: op_result.1.op_info,
-                        }
-                    ),
-                    Err(err) => Err(
-                        BlockError {
-                            op_info: op_result.1.op_info,
-                            error: err,
-                        }
-                    )
-                }
-            }).
-            boxed()
+        iter(read_ops)
+            .map(move |op| async move { (self.read_block(op.block_range.to_owned()).await, op) })
+            .buffered(BLOCK_BUFFER_SIZE)
+            .map(|op_result| match op_result.0 {
+                Ok(buf) => Ok(Block {
+                    buf: buf,
+                    op_info: op_result.1.op_info,
+                }),
+                Err(err) => Err(BlockError {
+                    op_info: op_result.1.op_info,
+                    error: err,
+                }),
+            })
+            .boxed()
     }
 
     fn len(&self) -> u64 {
         self.len
     }
 }
-

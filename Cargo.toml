@@ -20,9 +20,14 @@ futures = { version = "0.3.17" }
 async-trait = { version = "0.1.51" }
 anyhow = { version = "1.0.45" }
 rand = "0.8.0"
+uuid = { version = "0.8.2", features = ["v4"] }
+prost = "0.8.0"
+tonic = "0.5.2"
+base64 = "0.13.0"
 
 [dev-dependencies]
 tempfile = { version = "3" }
 
 [build-dependencies]
 built = { version = "0.5.1", features = ["chrono", "git2"] }
+tonic-build = "0.5.2"
