@@ -25,13 +25,11 @@ pub type Int64Buffer = PrimitiveBuffer<i64>;
 pub type Uint64Buffer = PrimitiveBuffer<u64>;
 pub type Float64Buffer = PrimitiveBuffer<f64>;
 
-
 /// A reusable growable bitmap.
-struct Bitmap {
+pub struct Bitmap {
     values: Vec<u8>,
     len: usize,
 }
-
 
 impl Bitmap {
     pub fn new() -> Self {
@@ -67,7 +65,9 @@ impl Bitmap {
         (self.values[idx >> 3] & BIT_MASK[idx & 7]) != 0
     }
 
-    pub fn len(&self) -> usize { self.len }
+    pub fn len(&self) -> usize {
+        self.len
+    }
 
     pub fn clear(&mut self) {
         self.len = 0;
@@ -111,7 +111,7 @@ impl<T> PrimitiveBuffer<T> {
     pub fn append_null(&mut self) {
         match self.validity {
             Some(ref mut validity) => validity.append(false),
-            None => panic!("null append on non-nullable buffer")
+            None => panic!("null append on non-nullable buffer"),
         }
         self.len += 1;
     }
@@ -192,7 +192,7 @@ impl BinaryBuffer {
     pub fn append_null(&mut self) {
         match self.validity {
             Some(ref mut validity) => validity.append(false),
-            None => panic!("null append on non-nullable buffer")
+            None => panic!("null append on non-nullable buffer"),
         }
         self.len += 1;
     }
@@ -239,7 +239,6 @@ impl BinaryBuffer {
     }
 }
 
-
 /// A growable sparse encoded buffer for bool values.
 pub struct BoolBuffer {
     values: Bitmap,
@@ -253,7 +252,6 @@ impl BoolBuffer {
             true => Some(Bitmap::new()),
             false => None,
         };
-
 
         Self {
             values: Bitmap::new(),
@@ -271,12 +269,11 @@ impl BoolBuffer {
         self.len += 1;
     }
 
-
     /// Append a new value to the buffer.
     pub fn append_null(&mut self) {
         match self.validity {
             Some(ref mut validity) => validity.append(false),
-            None => panic!("null append on non-nullable buffer")
+            None => panic!("null append on non-nullable buffer"),
         };
         self.len += 1;
     }
@@ -316,7 +313,6 @@ impl BoolBuffer {
         self.len = 0;
     }
 }
-
 
 #[cfg(test)]
 mod test {

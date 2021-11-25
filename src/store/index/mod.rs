@@ -11,16 +11,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-fn main() -> Result<(), String> {
-    built::write_built_file().expect("Failed to acquire build-time information");
+use anyhow::Result;
+use async_trait::async_trait;
 
+use crate::store::io::BlockWriter;
+use crate::store::segment_metadata::column_layout::ColumnIndexLayout;
 
-    tonic_build::configure().
-        build_server(true).
-        build_client(true).
-        out_dir("src/store").
-        compile(
-            &["src/store/segment_metadata.proto", ],
-            &["src/store/"]).
-        map_err(|err| format!("protobuf compilation failed: {}", err))
+#[async_trait]
+pub trait ColumnIndex<B> {
+    fn index(&mut self, buffer: &B) -> Result<()>;
+    async fn flush(&mut self, writer: &mut BlockWriter) -> Result<ColumnIndexLayout>;
 }

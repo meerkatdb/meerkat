@@ -13,11 +13,8 @@
 
 use std::path::Path;
 
-use async_trait::async_trait;
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
-
-use crate::store::io::BlockWriter;
 
 /// A `BlockWriter` based on `tokio::fs::File`.
 ///
@@ -27,32 +24,34 @@ use crate::store::io::BlockWriter;
 /// use `AIO/DIO`.
 pub struct Writer {
     file: File,
+    pos: u64,
 }
-
 
 impl Writer {
     pub async fn new(path: impl AsRef<Path>) -> std::io::Result<Self> {
         let file = File::create(path).await?;
-        Ok(Self { file })
+        Ok(Self { file: file, pos: 0 })
     }
-}
 
-#[async_trait]
-impl BlockWriter for Writer {
-    async fn write_block(&mut self, block: &[u8]) -> std::io::Result<()> {
+    /// Write a single block to disk.
+    pub async fn write_block(&mut self, block: &[u8]) -> std::io::Result<()> {
+        self.pos += block.len() as u64;
         self.file.write_all(block).await
     }
 
-    async fn flush(&mut self) -> std::io::Result<()> {
+    /// Wait for pending operations and flushes all internal buffers.
+    pub async fn flush(&mut self) -> std::io::Result<()> {
         self.file.flush().await
     }
 
-    async fn sync(&mut self) -> std::io::Result<()> {
+    /// Sync all OS-internal metadata to disk.
+    /// This function will attempt to ensure that all in-core data reaches
+    /// the filesystem before returning.
+    pub async fn sync(&mut self) -> std::io::Result<()> {
         self.file.sync_all().await
     }
+
+    pub fn pos(&self) -> u64 {
+        self.pos
+    }
 }
-
-
-
-
-

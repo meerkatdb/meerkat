@@ -11,5 +11,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod io;
+mod block_encoders;
+mod block_index;
+mod block_sink;
+mod index;
 mod indexing_buffer;
+mod io;
+mod segment_metadata;
+mod segment_writer;
