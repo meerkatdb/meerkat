@@ -22,7 +22,9 @@ use crate::store::indexing_buffer::{
 use crate::store::segment_metadata::column_layout::EncoderLayout;
 use crate::store::segment_metadata::Encoding;
 
+mod bitmap_rle;
 mod snappy;
+mod varint;
 
 #[async_trait]
 pub trait BlockSink {
