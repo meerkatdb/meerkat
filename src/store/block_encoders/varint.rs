@@ -125,12 +125,23 @@ pub fn decode_varint(buf: &[u8]) -> Result<(u64, usize)> {
     };
 
     // We have overrun the maximum size of a varint (10 bytes). Assume the data is corrupt.
-    return Err(anyhow!("invalid varint"));
+    Err(anyhow!("invalid varint"))
+}
+
+pub trait Encoder {
+    fn put_varint(&mut self, value: u64);
+}
+
+impl Encoder for Vec<u8> {
+    fn put_varint(&mut self, value: u64) {
+        let mut buf = [0u8; MAX_VARINT_LEN];
+        let enc_len = encode_varint(value, buf.as_mut_slice());
+        self.extend_from_slice(&buf[..enc_len]);
+    }
 }
 
 #[cfg(test)]
 mod test {
-
     use super::*;
 
     #[test]

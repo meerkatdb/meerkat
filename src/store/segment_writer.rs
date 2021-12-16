@@ -201,7 +201,13 @@ impl SegmentWriter {
         column_info: ColumnInfo,
     ) -> Result<ColumnWriter<'_, BinaryBuffer>> {
         self.block_index.clear();
-        let encoder = block_encoders::new_binary_encoder(column_info.encoding, BLOCK_SIZE)?;
+
+        let encoder = block_encoders::new_binary_encoder(
+            column_info.encoding,
+            BLOCK_SIZE,
+            column_info.nullable,
+        )?;
+
         let block_sink = BlockSinkImpl::new(&mut self.data_writer, &mut self.block_index);
 
         Ok(ColumnWriter {

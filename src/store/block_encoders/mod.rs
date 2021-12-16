@@ -22,8 +22,11 @@ use crate::store::indexing_buffer::{
 use crate::store::segment_metadata::column_layout::EncoderLayout;
 use crate::store::segment_metadata::Encoding;
 
+mod binary_plain;
 mod bitmap_rle;
+mod offsets;
 mod snappy;
+mod util;
 mod varint;
 
 #[async_trait]
@@ -80,12 +83,14 @@ where
 pub fn new_binary_encoder<S>(
     encoder: Encoding,
     block_size: u32,
+    nullable: bool,
 ) -> Result<Box<dyn BlockEncoder<BinaryBuffer, S>>>
 where
     S: BlockSink + Send,
 {
     match encoder {
-        Encoding::Snappy => Ok(Box::new(SnappyEncoder::new(block_size))),
+        Encoding::Snappy => Ok(Box::new(SnappyEncoder::new(block_size, nullable))),
+        Encoding::Plain => Ok(Box::new(binary_plain::Encoder::new(block_size, nullable))),
         _ => Err(anyhow!("invalid encoder for binary data {:?}", encoder)),
     }
 }

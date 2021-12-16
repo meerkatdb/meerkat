@@ -88,6 +88,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf1de2fe8c75bc145a2f577add951f8134889b4795d47466a54a5c846d691693"
 
 [[package]]
+name = "bitpacking"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "75c04b83d2b444a22c6a30f4d068597efbe468fe56f068e042e627ded2fb21e7"
+dependencies = [
+ "crunchy",
+]
+
+[[package]]
 name = "built"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -158,6 +167,12 @@ dependencies = [
  "unicode-width",
  "vec_map",
 ]
+
+[[package]]
+name = "crunchy"
+version = "0.1.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a2f4a431c5c9f662e1200b7c7f02c34e91361150e382089a8f2dec3ba680cbda"
 
 [[package]]
 name = "either"
@@ -450,9 +465,9 @@ dependencies = [
 
 [[package]]
 name = "itertools"
-version = "0.10.1"
+version = "0.10.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "69ddb889f9d0d08a67338271fa9b62996bc788c7796a5c18cf057420aaed5eaf"
+checksum = "a9a9d19fa1e79b6215ff29b9d6880b706147f16e9b1dbb1e4e5947b5b02bc5e3"
 dependencies = [
  "either",
 ]
@@ -548,9 +563,11 @@ dependencies = [
  "anyhow",
  "async-trait",
  "base64",
+ "bitpacking",
  "built",
  "clap",
  "futures",
+ "itertools",
  "pin-project-lite",
  "prost",
  "rand",

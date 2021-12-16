@@ -21,7 +21,7 @@ use crate::store::segment_metadata::NoLayout;
 pub struct SnappyEncoder {}
 
 impl SnappyEncoder {
-    pub fn new(block_size: u32) -> Self {
+    pub fn new(block_size: u32, nullable: bool) -> Self {
         Self {}
     }
 }

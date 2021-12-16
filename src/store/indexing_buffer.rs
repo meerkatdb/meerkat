@@ -16,6 +16,12 @@
 //!
 //! Column values are stored in a sparse representation, only non-null values
 //! are stored and validity data is encoded using an internal bitmap.
+//!
+
+use std::convert::TryInto;
+use std::ops::Range;
+
+use itertools::Itertools;
 
 const BIT_MASK: [u8; 8] = [1, 2, 4, 8, 16, 32, 64, 128];
 const INITIAL_BITMAP_CAP: usize = 1024;
@@ -58,6 +64,18 @@ impl Bitmap {
         }
 
         self.len += 1;
+    }
+
+    pub fn append_from(&mut self, src: &Bitmap, start_pos: usize, num_of_items: usize) -> usize {
+        let mut items = 0;
+        let mut bit_pos = start_pos;
+        while items < num_of_items {
+            let mut bit_value = src.is_set(bit_pos);
+            self.append(bit_value);
+            items += bit_value as usize;
+            bit_pos += 1;
+        }
+        bit_pos
     }
 
     pub fn is_set(&self, idx: usize) -> bool {
@@ -125,7 +143,7 @@ impl<T> PrimitiveBuffer<T> {
     /// Returns a ref to the validity bitmap.
     /// Panic if the buffer is not nullable.
     pub fn validity(&self) -> &Bitmap {
-        &self.validity.as_ref().unwrap()
+        self.validity.as_ref().unwrap()
     }
 
     /// Returns the number of items stored in the buffer including null values.
@@ -140,7 +158,7 @@ impl<T> PrimitiveBuffer<T> {
 
     /// Return true if the buffer contains nulls values.
     pub fn has_nulls(&self) -> bool {
-        !(self.values.len() == self.len)
+        self.values.len() != self.len
     }
 
     /// Clear all existing data from this buffer.
@@ -153,14 +171,23 @@ impl<T> PrimitiveBuffer<T> {
     }
 }
 
+#[derive(Debug)]
+pub struct BinaryChunk {
+    pub start_pos: usize,
+    pub end_pos: usize,
+    pub start_offset: u32,
+    pub end_offset: u32,
+    pub size: u32,
+    pub len: usize,
+}
+
 /// A growable sparse encoded buffer for binary types.
 /// Buffer items are stored sequentially and offsets to each item are stored
 /// in a separated offset buffer.
 pub struct BinaryBuffer {
-    values: Vec<u8>,
-    offsets: Vec<usize>,
+    data: Vec<u8>,
+    offsets: Vec<u32>,
     validity: Option<Bitmap>,
-    len: usize,
 }
 
 impl BinaryBuffer {
@@ -171,21 +198,20 @@ impl BinaryBuffer {
         };
 
         Self {
-            values: Vec::new(),
+            data: Vec::new(),
             offsets: vec![0; 1],
-            len: 0,
             validity: validity,
         }
     }
 
     /// Append a non-null value.
     pub fn append(&mut self, value: &[u8]) {
-        self.values.extend_from_slice(value);
-        self.offsets.push(self.values.len());
+        self.data.extend_from_slice(value);
+        let value_offset: u32 = self.data.len().try_into().expect("BinaryBuffer overflow");
+        self.offsets.push(value_offset);
         if let Some(ref mut validity) = self.validity {
             validity.append(true);
         }
-        self.len += 1;
     }
 
     /// Append a null value to the buffer.
@@ -194,28 +220,69 @@ impl BinaryBuffer {
             Some(ref mut validity) => validity.append(false),
             None => panic!("null append on non-nullable buffer"),
         }
-        self.len += 1;
+    }
+
+    pub fn item_len(&self, idx: usize) -> u32 {
+        self.offsets[idx + 1] - self.offsets[idx]
+    }
+
+    pub fn append_from(
+        &mut self,
+        buf: &BinaryBuffer,
+        chunk: &BinaryChunk,
+        validity_pos: usize,
+    ) -> usize {
+        let mut last_item_offset = *self.offsets.last().unwrap_or(&0u32);
+
+        for i in chunk.start_pos..chunk.end_pos {
+            last_item_offset += buf.item_len(i);
+            self.offsets.push(last_item_offset);
+        }
+
+        self.data
+            .extend_from_slice(&buf.data()[chunk.start_offset as usize..chunk.end_offset as usize]);
+
+        assert!(u32::MAX as usize > self.data.len());
+
+        if let Some(ref validity_src) = buf.validity {
+            let mut validity_dst = self
+                .validity
+                .as_mut()
+                .expect("trying to append validity on a non-nullable buffer");
+            validity_dst.append_from(validity_src, validity_pos, chunk.len)
+        } else {
+            assert!(self.validity.is_none(), "missing validity bitmap");
+            chunk.len
+        }
     }
 
     /// Returns a reference to the stored values.
-    pub fn values(&self) -> &[u8] {
-        self.values.as_slice()
+    pub fn data(&self) -> &[u8] {
+        self.data.as_slice()
     }
 
     /// Returns a slice containing the values offsets
-    pub fn offsets(&self) -> &[usize] {
+    pub fn offsets(&self) -> &[u32] {
         self.offsets.as_slice()
     }
 
     /// Returns a ref to the validity bitmap.
     /// Panic if the buffer is not nullable.
-    pub fn validity(&self) -> &Bitmap {
-        &self.validity.as_ref().unwrap()
+    pub fn validity(&self) -> Option<&Bitmap> {
+        self.validity.as_ref()
     }
 
-    /// The number of items stored in this buffer. ( including non-null )
+    /// Returns the number of not nulls items stored in this buffer.
     pub fn len(&self) -> usize {
-        self.len
+        self.offsets.len() - 1
+    }
+
+    /// Returns the number of items stored in this buffer. ( including nulls )
+    pub fn num_values(&self) -> usize {
+        match self.validity {
+            Some(ref validity) => validity.len(),
+            None => self.len(),
+        }
     }
 
     /// Returns true if the buffer accepts non-null values.
@@ -225,17 +292,41 @@ impl BinaryBuffer {
 
     /// Returns true if the buffer has null items.
     pub fn has_nulls(&self) -> bool {
-        !(self.offsets.len() - 1 == self.len)
+        match self.validity {
+            Some(ref validity) => validity.len() - self.len() != 0,
+            None => false,
+        }
     }
 
     /// Clear all existing data from this buffer.
     pub fn clear(&mut self) {
-        self.len = 0;
-        self.values.clear();
+        self.data.clear();
         self.offsets.truncate(1);
         if let Some(ref mut validity) = self.validity {
             validity.clear();
         };
+    }
+
+    pub fn chunk(&self, start_pos: usize, min_size: u64) -> BinaryChunk {
+        let start_offset = self.offsets()[start_pos];
+
+        let maybe_end_pos = self.offsets()[start_pos..]
+            .iter()
+            .find_position(|offset| (*offset - start_offset) as u64 >= min_size);
+
+        let (end_pos, end_offset) = match maybe_end_pos {
+            Some(pos) => (pos.0, *pos.1),
+            None => (self.offsets.len() - 1, self.offsets[self.offsets.len() - 1]),
+        };
+
+        BinaryChunk {
+            start_pos,
+            end_pos,
+            start_offset,
+            end_offset,
+            size: end_offset - start_offset,
+            len: end_pos - start_pos,
+        }
     }
 }
 
@@ -316,6 +407,7 @@ impl BoolBuffer {
 
 #[cfg(test)]
 mod test {
+    use itertools::Chunk;
     use rand::Rng;
 
     use super::*;
@@ -338,6 +430,29 @@ mod test {
         }
 
         assert_eq!(bitmap.len(), values.len());
+    }
+
+    #[test]
+    fn bitmap_append_from_test() {
+        let mut bitmap_dst = Bitmap::new();
+
+        for _ in 0..6 {
+            bitmap_dst.append(true);
+        }
+
+        let mut bitmap_src = Bitmap::new();
+        bitmap_src.append(true);
+        bitmap_src.append(false);
+        bitmap_src.append(true);
+        bitmap_src.append(false);
+        bitmap_src.append(true);
+
+        let num_items = bitmap_dst.append_from(&bitmap_src, 0, 2);
+
+        assert_eq!(bitmap_dst.len(), 9);
+        assert_eq!(num_items, 3);
+        assert!(!bitmap_dst.is_set(7));
+        assert!(bitmap_dst.is_set(8));
     }
 
     #[test]
@@ -400,11 +515,11 @@ mod test {
         buffer.append("Gray".as_bytes());
 
         assert_eq!(buffer.len(), 3);
-        assert_eq!(buffer.values().len(), 17);
+        assert_eq!(buffer.data().len(), 17);
         assert_eq!(buffer.is_nullable(), false);
         assert_eq!(buffer.has_nulls(), false);
 
-        let expected_offsets: Vec<usize> = vec![0, 6, 13, 17];
+        let expected_offsets: Vec<u32> = vec![0, 6, 13, 17];
         for (actual, expected) in buffer.offsets.iter().zip(expected_offsets.iter()) {
             assert_eq!(actual, expected);
         }
@@ -412,7 +527,7 @@ mod test {
         buffer.clear();
 
         assert_eq!(buffer.len(), 0);
-        assert_eq!(buffer.values().len(), 0);
+        assert_eq!(buffer.data().len(), 0);
         assert_eq!(buffer.is_nullable(), false);
         assert_eq!(buffer.has_nulls(), false);
 
@@ -430,12 +545,12 @@ mod test {
         buffer.append_null();
         buffer.append("Gray".as_bytes());
 
-        assert_eq!(buffer.len(), 6);
-        assert_eq!(buffer.values().len(), 17);
+        assert_eq!(buffer.len(), 3);
+        assert_eq!(buffer.data().len(), 17);
         assert_eq!(buffer.is_nullable(), true);
         assert_eq!(buffer.has_nulls(), true);
 
-        let expected_offsets: Vec<usize> = vec![0, 6, 13, 17];
+        let expected_offsets: Vec<u32> = vec![0, 6, 13, 17];
         for (actual, expected) in buffer.offsets.iter().zip(expected_offsets.iter()) {
             assert_eq!(actual, expected);
         }
@@ -443,11 +558,53 @@ mod test {
         buffer.clear();
 
         assert_eq!(buffer.len(), 0);
-        assert_eq!(buffer.values().len(), 0);
+        assert_eq!(buffer.data().len(), 0);
         assert_eq!(buffer.is_nullable(), true);
         assert_eq!(buffer.has_nulls(), false);
 
         buffer.append("Naur".as_bytes());
+    }
+
+    #[test]
+    fn test_binary_append_from() {
+        let mut src = BinaryBuffer::new(true);
+
+        for _ in 0..10 {
+            src.append_null();
+        }
+
+        src.append("Knuth".as_bytes());
+
+        let mut dst = BinaryBuffer::new(true);
+
+        dst.append("Liskov".as_bytes());
+        dst.append_null();
+        dst.append_null();
+        dst.append("Lamport".as_bytes());
+        dst.append_null();
+        dst.append("Gray".as_bytes());
+        dst.append_null();
+
+        let chunk = BinaryChunk {
+            start_pos: 0,
+            end_pos: src.len(),
+            start_offset: 0,
+            end_offset: src.offsets[1],
+            size: src.offsets[1],
+            len: 1,
+        };
+
+        dst.append_from(&src, &chunk, 0);
+
+        assert_eq!(dst.len(), 4);
+        assert_eq!(dst.data().len(), 22);
+        assert_eq!(dst.is_nullable(), true);
+        assert_eq!(dst.has_nulls(), true);
+
+        let expected_offsets: Vec<u32> = vec![0, 6, 13, 17, 22];
+        for (actual, expected) in dst.offsets.iter().zip(expected_offsets.iter()) {
+            assert_eq!(actual, expected);
+        }
     }
 
     #[test]

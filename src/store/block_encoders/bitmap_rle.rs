@@ -16,6 +16,7 @@
 use std::convert::TryInto;
 
 use crate::store::block_encoders::varint;
+use crate::store::indexing_buffer::Bitmap;
 
 const BIT_MASK: [u8; 8] = [1, 2, 4, 8, 16, 32, 64, 128];
 const MIN_RUN_LEN: usize = 3;
@@ -65,6 +66,18 @@ impl Encoder {
             self.append(self.byte);
             self.byte = 0;
         }
+    }
+
+    pub fn put_from(&mut self, bitmap: &Bitmap, start_pos: usize, num_valids: usize) -> usize {
+        let mut items = 0;
+        let mut bit_pos = start_pos;
+        while items < num_valids {
+            let bit_value = bitmap.is_set(bit_pos);
+            self.put(bit_value);
+            items += bit_value as usize;
+            bit_pos += 1;
+        }
+        bit_pos
     }
 
     /// flush the internal buffer and encode pending values.
@@ -221,7 +234,7 @@ impl<'a> Decoder<'a> {
                 Frame::Bitmap { bytes } => self.decode_bitmap(bytes),
             }
         }
-        return self.decoded_data_pos;
+        self.decoded_data_pos
     }
 
     pub fn read_frame(&mut self) -> Frame<'a> {
