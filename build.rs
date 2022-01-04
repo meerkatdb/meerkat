@@ -14,13 +14,10 @@
 fn main() -> Result<(), String> {
     built::write_built_file().expect("Failed to acquire build-time information");
 
-
-    tonic_build::configure().
-        build_server(true).
-        build_client(true).
-        out_dir("src/store").
-        compile(
-            &["src/store/segment_metadata.proto", ],
-            &["src/store/"]).
-        map_err(|err| format!("protobuf compilation failed: {}", err))
+    tonic_build::configure()
+        .build_server(true)
+        .build_client(true)
+        .out_dir("src/store")
+        .compile(&["src/store/segment_metadata.proto"], &["src/store/"])
+        .map_err(|err| format!("protobuf compilation failed: {}", err))
 }
