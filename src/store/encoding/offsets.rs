@@ -13,7 +13,7 @@
 
 use bitpacking::{BitPacker, BitPacker4x};
 
-use crate::store::block_encoders::util::{ceil8, round_upto_power_of_2};
+use crate::store::encoding::util::{ceil8, round_upto_power_of_2};
 
 pub struct OffsetEncoder {
     bitpacker: BitPacker4x,

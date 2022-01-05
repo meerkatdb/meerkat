@@ -21,24 +21,19 @@
 /// ```
 ///
 use std::convert::TryInto;
-use std::ops::Range;
 
 use anyhow::Result;
 use async_trait::async_trait;
-use bitpacking::{BitPacker, BitPacker4x};
 use itertools::Itertools;
-use tokio::test;
 
-use crate::store::block_encoders::bitmap_rle;
-use crate::store::block_encoders::offsets::OffsetEncoder;
-use crate::store::block_encoders::util::ceil8;
-use crate::store::block_encoders::{BlockEncoder, BlockSink};
-use crate::store::indexing_buffer::{BinaryBuffer, Bitmap};
+use crate::store::encoding::bitmap_rle;
+use crate::store::encoding::offsets::OffsetEncoder;
+use crate::store::encoding::{BlockEncoder, BlockSink};
+use crate::store::indexing_buffer::BinaryBuffer;
 use crate::store::segment_metadata::column_layout::EncoderLayout;
 use crate::store::segment_metadata::NoLayout;
 
-use super::util;
-use super::varint::Encoder as VarintEncoder;
+use crate::store::encoding::varint::Encoder as _;
 
 pub struct Encoder {
     remaining: BinaryBuffer,
@@ -67,7 +62,7 @@ impl Encoder {
         &mut self,
         buf: &BinaryBuffer,
         chunk: &BinaryChunk,
-        mut bit_pos: usize,
+        bit_pos: usize,
         sink: &mut S,
     ) -> Result<EncodeResult> {
         let result = encode_binary_buffer(
@@ -262,7 +257,7 @@ pub fn chunk(buffer: &BinaryBuffer, start_pos: usize, min_size: u64) -> BinaryCh
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::store::block_encoders::test::SinkMock;
+    use crate::store::encoding::test::SinkMock;
 
     #[tokio::test]
     async fn test_remaining() {

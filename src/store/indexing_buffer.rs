@@ -19,7 +19,6 @@
 //!
 
 use std::convert::TryInto;
-use std::ops::Range;
 
 const BIT_MASK: [u8; 8] = [1, 2, 4, 8, 16, 32, 64, 128];
 const INITIAL_BITMAP_CAP: usize = 1024;
@@ -68,7 +67,7 @@ impl Bitmap {
         let mut items = 0;
         let mut bit_pos = start_pos;
         while items < num_of_items {
-            let mut bit_value = src.is_set(bit_pos);
+            let bit_value = src.is_set(bit_pos);
             self.append(bit_value);
             items += bit_value as usize;
             bit_pos += 1;
@@ -142,7 +141,7 @@ impl<T: Clone> PrimitiveBuffer<T> {
         let num_values = end - start;
 
         if let Some(ref validity_src) = buf.validity {
-            let mut validity_dst = self
+            let validity_dst = self
                 .validity
                 .as_mut()
                 .expect("trying to append validity on a non-nullable buffer");
@@ -270,7 +269,7 @@ impl BinaryBuffer {
         assert!(u32::MAX as usize > self.data.len());
 
         if let Some(ref validity_src) = buf.validity {
-            let mut validity_dst = self
+            let validity_dst = self
                 .validity
                 .as_mut()
                 .expect("trying to append validity on a non-nullable buffer");

@@ -13,21 +13,21 @@
 
 use async_trait::async_trait;
 
-use crate::store::block_encoders::{BlockEncoder, BlockSink};
+use crate::store::encoding::{BlockEncoder, BlockSink};
 use crate::store::indexing_buffer::BinaryBuffer;
 use crate::store::segment_metadata::column_layout::EncoderLayout;
 use crate::store::segment_metadata::NoLayout;
 
-pub struct SnappyEncoder {}
+pub struct Encoder {}
 
-impl SnappyEncoder {
+impl Encoder {
     pub fn new(block_size: u32, nullable: bool) -> Self {
         Self {}
     }
 }
 
 #[async_trait]
-impl<S: BlockSink + Send> BlockEncoder<BinaryBuffer, S> for SnappyEncoder {
+impl<S: BlockSink + Send> BlockEncoder<BinaryBuffer, S> for Encoder {
     async fn encode(&mut self, buffer: &BinaryBuffer, sink: &mut S) -> anyhow::Result<()> {
         sink.write_block(43243, b"snappy").await?;
         Ok(())

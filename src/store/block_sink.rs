@@ -14,8 +14,8 @@
 use anyhow::Result;
 use async_trait::async_trait;
 
-use crate::store::block_encoders::BlockSink;
 use crate::store::block_index::BlockIndex;
+use crate::store::encoding::BlockSink;
 use crate::store::io::BlockWriter;
 
 /// Index and write the blocks produced by the encoder.

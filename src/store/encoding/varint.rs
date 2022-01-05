@@ -146,7 +146,7 @@ mod test {
 
     #[test]
     fn varint() {
-        fn check(value: u64, mut expected_bytes: &[u8]) {
+        fn check(value: u64, expected_bytes: &[u8]) {
             let mut buf: [u8; MAX_VARINT_LEN] = [0; MAX_VARINT_LEN];
             let encoded_len = encode_varint(value, &mut buf);
             let encoded_bytes = &buf[..encoded_len];

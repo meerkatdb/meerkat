@@ -143,7 +143,7 @@ pub enum ColumnType {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
 pub enum Encoding {
-    Plain = 0,
+    Raw = 0,
     BitPacked = 1,
     DeltaBinaryPacked = 2,
     RleDictionary = 3,

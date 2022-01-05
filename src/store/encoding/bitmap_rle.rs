@@ -15,7 +15,7 @@
 
 use std::convert::TryInto;
 
-use crate::store::block_encoders::varint;
+use crate::store::encoding::varint;
 use crate::store::indexing_buffer::Bitmap;
 
 const BIT_MASK: [u8; 8] = [1, 2, 4, 8, 16, 32, 64, 128];
@@ -347,14 +347,14 @@ mod test {
 
     #[test]
     fn test_roundtrip_run_1() {
-        let mut values = &[true; 24];
+        let values = &[true; 24];
         let encoded = roundtrip_test(values);
         assert_eq!(encoded.len(), 2);
     }
 
     #[test]
     fn test_roundtrip_run_0() {
-        let mut values = &[false; 24];
+        let values = &[false; 24];
         let encoded = roundtrip_test(values);
         assert_eq!(encoded.len(), 2);
     }

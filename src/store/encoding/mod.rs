@@ -14,17 +14,16 @@
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 
-use crate::store::block_encoders::snappy::SnappyEncoder;
 use crate::store::indexing_buffer::{
     BinaryBuffer, Float64Buffer, Int32Buffer, Int64Buffer, Uint64Buffer,
 };
+
 use crate::store::segment_metadata::column_layout::EncoderLayout;
 use crate::store::segment_metadata::Encoding;
 
-mod binary_plain;
 mod bitmap_rle;
 mod offsets;
-mod primitive_plain;
+mod raw;
 mod snappy;
 mod util;
 mod varint;
@@ -49,7 +48,7 @@ where
     S: BlockSink + Send,
 {
     match encoder {
-        Encoding::Plain => Ok(Box::new(primitive_plain::Encoder::new(
+        Encoding::Raw => Ok(Box::new(raw::primitive_enc::Encoder::new(
             block_size, nullable,
         ))),
         _ => Err(anyhow!("invalid encoder for i32 data {:?}", encoder)),
@@ -65,7 +64,7 @@ where
     S: BlockSink + Send,
 {
     match encoder {
-        Encoding::Plain => Ok(Box::new(primitive_plain::Encoder::new(
+        Encoding::Raw => Ok(Box::new(raw::primitive_enc::Encoder::new(
             block_size, nullable,
         ))),
         _ => Err(anyhow!("invalid encoder for i64 data {:?}", encoder)),
@@ -81,7 +80,7 @@ where
     S: BlockSink + Send,
 {
     match encoder {
-        Encoding::Plain => Ok(Box::new(primitive_plain::Encoder::new(
+        Encoding::Raw => Ok(Box::new(raw::primitive_enc::Encoder::new(
             block_size, nullable,
         ))),
         _ => Err(anyhow!("invalid encoder for u64 data {:?}", encoder)),
@@ -89,13 +88,19 @@ where
 }
 
 pub fn new_f64_encoder<S>(
-    encoder: String,
-    block_size: u32,
+    encoder: Encoding,
+    block_size: usize,
+    nullable: bool,
 ) -> Result<Box<dyn BlockEncoder<Float64Buffer, S>>>
 where
-    S: BlockSink,
+    S: BlockSink + Send,
 {
-    todo!()
+    match encoder {
+        Encoding::Raw => Ok(Box::new(raw::primitive_enc::Encoder::new(
+            block_size, nullable,
+        ))),
+        _ => Err(anyhow!("invalid encoder for f64 data {:?}", encoder)),
+    }
 }
 
 pub fn new_binary_encoder<S>(
@@ -107,8 +112,12 @@ where
     S: BlockSink + Send,
 {
     match encoder {
-        Encoding::Snappy => Ok(Box::new(SnappyEncoder::new(block_size, nullable))),
-        Encoding::Plain => Ok(Box::new(binary_plain::Encoder::new(block_size, nullable))),
+        Encoding::Snappy => Ok(Box::new(snappy::snappy_enc::Encoder::new(
+            block_size, nullable,
+        ))),
+        Encoding::Raw => Ok(Box::new(raw::binary_enc::Encoder::new(
+            block_size, nullable,
+        ))),
         _ => Err(anyhow!("invalid encoder for binary data {:?}", encoder)),
     }
 }

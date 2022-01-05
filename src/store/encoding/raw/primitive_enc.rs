@@ -25,13 +25,13 @@ use std::mem::size_of;
 use anyhow::Result;
 use async_trait::async_trait;
 
-use crate::store::block_encoders::bitmap_rle;
-use crate::store::block_encoders::{BlockEncoder, BlockSink};
+use crate::store::encoding::bitmap_rle;
+use crate::store::encoding::{BlockEncoder, BlockSink};
 use crate::store::indexing_buffer::PrimitiveBuffer;
 use crate::store::segment_metadata::column_layout::EncoderLayout;
 use crate::store::segment_metadata::NoLayout;
 
-use super::varint::Encoder as VarintEncoder;
+use crate::store::encoding::varint::Encoder as _;
 
 pub struct Encoder<T> {
     remaining: PrimitiveBuffer<T>,
@@ -227,9 +227,8 @@ fn to_byte_slice<'a, T>(src: &'a [T]) -> &'a [u8] {
 
 #[cfg(test)]
 mod test {
-    use tokio::test;
 
-    use crate::store::block_encoders::test::SinkMock;
+    use crate::store::encoding::test::SinkMock;
 
     use super::*;
 
