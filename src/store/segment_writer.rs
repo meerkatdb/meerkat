@@ -94,10 +94,10 @@ use anyhow::{Context, Result};
 use prost::Message;
 use uuid::Uuid;
 
-use crate::store::block_encoders;
-use crate::store::block_encoders::BlockEncoder;
 use crate::store::block_index::BlockIndex;
 use crate::store::block_sink::BlockSinkImpl;
+use crate::store::encoding;
+use crate::store::encoding::BlockEncoder;
 use crate::store::index::ColumnIndex;
 use crate::store::indexing_buffer::BinaryBuffer;
 use crate::store::segment_metadata;
@@ -202,11 +202,8 @@ impl SegmentWriter {
     ) -> Result<ColumnWriter<'_, BinaryBuffer>> {
         self.block_index.clear();
 
-        let encoder = block_encoders::new_binary_encoder(
-            column_info.encoding,
-            BLOCK_SIZE,
-            column_info.nullable,
-        )?;
+        let encoder =
+            encoding::new_binary_encoder(column_info.encoding, BLOCK_SIZE, column_info.nullable)?;
 
         let block_sink = BlockSinkImpl::new(&mut self.data_writer, &mut self.block_index);
 
@@ -352,7 +349,7 @@ mod tests {
         let mut segment_writer = SegmentWriter::new(tmp_dir, segment_info).await.unwrap();
 
         let col_info = ColumnInfo {
-            encoding: Encoding::Snappy,
+            encoding: Encoding::Raw,
             nullable: false,
             name: "test columns".to_string(),
             index_type: IndexType::NoIndex,

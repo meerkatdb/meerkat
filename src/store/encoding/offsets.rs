@@ -13,7 +13,7 @@
 
 use bitpacking::{BitPacker, BitPacker4x};
 
-use crate::store::block_encoders::util::{ceil8, round_upto_power_of_2};
+use crate::store::encoding::util::{ceil8, round_upto_power_of_2};
 
 pub struct OffsetEncoder {
     bitpacker: BitPacker4x,
@@ -26,9 +26,15 @@ impl OffsetEncoder {
         }
     }
 
-    //
+    /// Encode a list of offsets into a Vec.
+    /// ```text
+    /// ┌───────────────────┬─────────────────────────┐
+    /// │ Bitpack Num Bytes │ Bitpacked Delta Offsets │
+    /// │      1 Byte       │         N Byte          │
+    /// └───────────────────┴─────────────────────────┘
+    /// ```
     pub fn encode(&mut self, src: &mut Vec<u32>, dst: &mut Vec<u8>) {
-        let num_delta = src.len();
+        let num_values = src.len();
 
         let len_padded = round_upto_power_of_2(src.len(), BitPacker4x::BLOCK_LEN);
         src.resize(len_padded, 0);
@@ -51,7 +57,7 @@ impl OffsetEncoder {
         }
 
         // trim to remove the encoded padding.
-        let encoded_data_len = encoded_data_start + ceil8(num_bits as usize * num_delta);
+        let encoded_data_len = encoded_data_start + ceil8(num_bits as usize * num_values);
 
         dst.resize(encoded_data_len, 0);
     }

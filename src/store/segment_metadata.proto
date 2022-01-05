@@ -28,7 +28,7 @@ enum ColumnType {
 }
 
 enum Encoding{
-  PLAIN               = 0;
+  RAW                 = 0;
   BIT_PACKED          = 1;
   DELTA_BINARY_PACKED = 2;
   RLE_DICTIONARY      = 3;

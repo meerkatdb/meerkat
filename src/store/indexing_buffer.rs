@@ -19,9 +19,6 @@
 //!
 
 use std::convert::TryInto;
-use std::ops::Range;
-
-use itertools::Itertools;
 
 const BIT_MASK: [u8; 8] = [1, 2, 4, 8, 16, 32, 64, 128];
 const INITIAL_BITMAP_CAP: usize = 1024;
@@ -70,7 +67,7 @@ impl Bitmap {
         let mut items = 0;
         let mut bit_pos = start_pos;
         while items < num_of_items {
-            let mut bit_value = src.is_set(bit_pos);
+            let bit_value = src.is_set(bit_pos);
             self.append(bit_value);
             items += bit_value as usize;
             bit_pos += 1;
@@ -144,7 +141,7 @@ impl<T: Clone> PrimitiveBuffer<T> {
         let num_values = end - start;
 
         if let Some(ref validity_src) = buf.validity {
-            let mut validity_dst = self
+            let validity_dst = self
                 .validity
                 .as_mut()
                 .expect("trying to append validity on a non-nullable buffer");
@@ -203,16 +200,6 @@ impl<T: Clone> PrimitiveBuffer<T> {
     }
 }
 
-#[derive(Debug)]
-pub struct BinaryChunk {
-    pub start_pos: usize,
-    pub end_pos: usize,
-    pub start_offset: u32,
-    pub end_offset: u32,
-    pub size: u32,
-    pub len: usize,
-}
-
 /// A growable sparse encoded buffer for binary types.
 /// Buffer items are stored sequentially and offsets to each item are stored
 /// in a separated offset buffer.
@@ -261,30 +248,35 @@ impl BinaryBuffer {
     pub fn append_from(
         &mut self,
         buf: &BinaryBuffer,
-        chunk: &BinaryChunk,
+        start: usize,
+        end: usize,
         validity_pos: usize,
     ) -> usize {
+        let start_offset = buf.offsets[start];
+        let end_offset = buf.offsets[end];
+        let chunk_len = end - start;
+
         let mut last_item_offset = *self.offsets.last().unwrap_or(&0u32);
 
-        for i in chunk.start_pos..chunk.end_pos {
+        for i in start..end {
             last_item_offset += buf.item_len(i);
             self.offsets.push(last_item_offset);
         }
 
         self.data
-            .extend_from_slice(&buf.data()[chunk.start_offset as usize..chunk.end_offset as usize]);
+            .extend_from_slice(&buf.data()[start_offset as usize..end_offset as usize]);
 
         assert!(u32::MAX as usize > self.data.len());
 
         if let Some(ref validity_src) = buf.validity {
-            let mut validity_dst = self
+            let validity_dst = self
                 .validity
                 .as_mut()
                 .expect("trying to append validity on a non-nullable buffer");
-            validity_dst.append_from(validity_src, validity_pos, chunk.len)
+            validity_dst.append_from(validity_src, validity_pos, chunk_len)
         } else {
             assert!(self.validity.is_none(), "missing validity bitmap");
-            chunk.len
+            chunk_len
         }
     }
 
@@ -337,28 +329,6 @@ impl BinaryBuffer {
         if let Some(ref mut validity) = self.validity {
             validity.clear();
         };
-    }
-
-    pub fn chunk(&self, start_pos: usize, min_size: u64) -> BinaryChunk {
-        let start_offset = self.offsets()[start_pos];
-
-        let maybe_end_pos = self.offsets()[start_pos..]
-            .iter()
-            .find_position(|offset| (*offset - start_offset) as u64 >= min_size);
-
-        let (end_pos, end_offset) = match maybe_end_pos {
-            Some(pos) => (pos.0, *pos.1),
-            None => (self.offsets.len() - 1, self.offsets[self.offsets.len() - 1]),
-        };
-
-        BinaryChunk {
-            start_pos,
-            end_pos,
-            start_offset,
-            end_offset,
-            size: end_offset - start_offset,
-            len: end_pos - start_pos,
-        }
     }
 }
 
@@ -439,7 +409,6 @@ impl BoolBuffer {
 
 #[cfg(test)]
 mod test {
-    use itertools::Chunk;
     use rand::Rng;
 
     use super::*;
@@ -617,16 +586,7 @@ mod test {
         dst.append("Gray".as_bytes());
         dst.append_null();
 
-        let chunk = BinaryChunk {
-            start_pos: 0,
-            end_pos: src.len(),
-            start_offset: 0,
-            end_offset: src.offsets[1],
-            size: src.offsets[1],
-            len: 1,
-        };
-
-        dst.append_from(&src, &chunk, 0);
+        dst.append_from(&src, 0, src.len(), 0);
 
         assert_eq!(dst.len(), 4);
         assert_eq!(dst.data().len(), 22);
