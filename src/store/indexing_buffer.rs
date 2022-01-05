@@ -518,8 +518,8 @@ mod test {
         buffer.append_null();
         buffer.append(3);
 
-        assert_eq!(buffer.len(), 5);
-        assert_eq!(buffer.values().len(), 3);
+        assert_eq!(buffer.len(), 3);
+        assert_eq!(buffer.num_values(), 5);
         assert_eq!(buffer.is_nullable(), true);
         assert_eq!(buffer.has_nulls(), true);
 
