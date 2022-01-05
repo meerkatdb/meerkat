@@ -98,10 +98,9 @@ impl Bitmap {
 pub struct PrimitiveBuffer<T> {
     values: Vec<T>,
     validity: Option<Bitmap>,
-    len: usize,
 }
 
-impl<T> PrimitiveBuffer<T> {
+impl<T: Clone> PrimitiveBuffer<T> {
     pub fn new(nullable: bool) -> Self {
         let validity = match nullable {
             true => Some(Bitmap::new()),
@@ -110,7 +109,6 @@ impl<T> PrimitiveBuffer<T> {
 
         Self {
             values: Vec::new(),
-            len: 0,
             validity: validity,
         }
     }
@@ -121,7 +119,6 @@ impl<T> PrimitiveBuffer<T> {
         if let Some(ref mut validity) = self.validity {
             validity.append(true);
         }
-        self.len += 1;
     }
 
     /// Append a null value to the buffer.
@@ -131,7 +128,32 @@ impl<T> PrimitiveBuffer<T> {
             Some(ref mut validity) => validity.append(false),
             None => panic!("null append on non-nullable buffer"),
         }
-        self.len += 1;
+    }
+
+    pub fn append_from(
+        &mut self,
+        buf: &PrimitiveBuffer<T>,
+        start: usize,
+        end: usize,
+        validity_pos: usize,
+    ) -> usize {
+        self.values.extend_from_slice(&buf.values[start..end]);
+
+        assert!(u32::MAX as usize > self.values.len());
+
+        let num_values = end - start;
+
+        if let Some(ref validity_src) = buf.validity {
+            let mut validity_dst = self
+                .validity
+                .as_mut()
+                .expect("trying to append validity on a non-nullable buffer");
+
+            validity_dst.append_from(validity_src, validity_pos, num_values)
+        } else {
+            assert!(self.validity.is_none(), "missing validity bitmap");
+            num_values
+        }
     }
 
     /// Returns the values stored in this buffer.
@@ -142,13 +164,21 @@ impl<T> PrimitiveBuffer<T> {
 
     /// Returns a ref to the validity bitmap.
     /// Panic if the buffer is not nullable.
-    pub fn validity(&self) -> &Bitmap {
-        self.validity.as_ref().unwrap()
+    pub fn validity(&self) -> Option<&Bitmap> {
+        self.validity.as_ref()
     }
 
     /// Returns the number of items stored in the buffer including null values.
     pub fn len(&self) -> usize {
-        self.len
+        self.values.len()
+    }
+
+    /// Returns the number of items stored in this buffer. ( including nulls )
+    pub fn num_values(&self) -> usize {
+        match self.validity {
+            Some(ref validity) => validity.len(),
+            None => self.values.len(),
+        }
     }
 
     /// Returns true if the buffer accepts non-null values.
@@ -156,14 +186,16 @@ impl<T> PrimitiveBuffer<T> {
         self.validity.is_some()
     }
 
-    /// Return true if the buffer contains nulls values.
+    /// Returns true if the buffer has null items.
     pub fn has_nulls(&self) -> bool {
-        self.values.len() != self.len
+        match self.validity {
+            Some(ref validity) => validity.len() - self.values.len() != 0,
+            None => false,
+        }
     }
 
     /// Clear all existing data from this buffer.
     pub fn clear(&mut self) {
-        self.len = 0;
         self.values.clear();
         if let Some(ref mut validity) = self.validity {
             validity.clear();
@@ -486,8 +518,8 @@ mod test {
         buffer.append_null();
         buffer.append(3);
 
-        assert_eq!(buffer.len(), 5);
-        assert_eq!(buffer.values().len(), 3);
+        assert_eq!(buffer.len(), 3);
+        assert_eq!(buffer.num_values(), 5);
         assert_eq!(buffer.is_nullable(), true);
         assert_eq!(buffer.has_nulls(), true);
 

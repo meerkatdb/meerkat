@@ -20,8 +20,6 @@
 /// └─────────────┴────────────┴───────────────────┴─────────────────────────┴──────────────┘
 /// ```
 ///
-
-
 use std::convert::TryInto;
 use std::ops::Range;
 
@@ -30,10 +28,10 @@ use async_trait::async_trait;
 use bitpacking::{BitPacker, BitPacker4x};
 use tokio::test;
 
-use crate::store::block_encoders::{BlockEncoder, BlockSink};
 use crate::store::block_encoders::bitmap_rle;
 use crate::store::block_encoders::offsets::OffsetEncoder;
 use crate::store::block_encoders::util::ceil8;
+use crate::store::block_encoders::{BlockEncoder, BlockSink};
 use crate::store::indexing_buffer::{BinaryBuffer, BinaryChunk, Bitmap};
 use crate::store::segment_metadata::column_layout::EncoderLayout;
 use crate::store::segment_metadata::NoLayout;
@@ -89,10 +87,7 @@ impl Encoder {
         Ok(result)
     }
 
-    async fn write_remaining<S: BlockSink + Send>(
-        &mut self,
-        sink: &mut S,
-    ) -> Result<EncodeResult> {
+    async fn write_remaining<S: BlockSink + Send>(&mut self, sink: &mut S) -> Result<EncodeResult> {
         let chunk = BinaryChunk {
             start_pos: 0,
             end_pos: self.remaining.offsets().len() - 1,
@@ -158,9 +153,7 @@ impl<S: BlockSink + Send> BlockEncoder<BinaryBuffer, S> for Encoder {
                 return Ok(());
             }
 
-            let result = self
-                .write_block(buffer, &chunk, validity_pos, sink)
-                .await?;
+            let result = self.write_block(buffer, &chunk, validity_pos, sink).await?;
 
             buf_pos = chunk.end_pos;
             validity_pos = result.last_validity_pos;
@@ -230,33 +223,7 @@ fn encode_binary_buffer(
 #[cfg(test)]
 mod test {
     use super::*;
-
-    #[derive(Debug)]
-    struct CapturedBlock {
-        row_id: u32,
-        block_data: Vec<u8>,
-    }
-
-    struct SinkMock {
-        blocks: Vec<CapturedBlock>,
-    }
-
-    impl SinkMock {
-        fn new() -> Self {
-            Self { blocks: Vec::new() }
-        }
-    }
-
-    #[async_trait]
-    impl BlockSink for SinkMock {
-        async fn write_block(&mut self, row_id: u32, block_data: &[u8]) -> Result<()> {
-            self.blocks.push(CapturedBlock {
-                row_id: row_id,
-                block_data: Vec::from(block_data),
-            });
-            Ok(())
-        }
-    }
+    use crate::store::block_encoders::test::SinkMock;
 
     #[tokio::test]
     async fn test_remaining() {

@@ -18,13 +18,13 @@ use crate::store::block_encoders::snappy::SnappyEncoder;
 use crate::store::indexing_buffer::{
     BinaryBuffer, Float64Buffer, Int32Buffer, Int64Buffer, Uint64Buffer,
 };
-
 use crate::store::segment_metadata::column_layout::EncoderLayout;
 use crate::store::segment_metadata::Encoding;
 
 mod binary_plain;
 mod bitmap_rle;
 mod offsets;
+mod primitive_plain;
 mod snappy;
 mod util;
 mod varint;
@@ -41,33 +41,51 @@ pub trait BlockEncoder<B, S: BlockSink> {
 }
 
 pub fn new_i32_encoder<S>(
-    encoder: String,
-    block_size: u32,
+    encoder: Encoding,
+    block_size: usize,
+    nullable: bool,
 ) -> Result<Box<dyn BlockEncoder<Int32Buffer, S>>>
 where
-    S: BlockSink,
+    S: BlockSink + Send,
 {
-    todo!()
+    match encoder {
+        Encoding::Plain => Ok(Box::new(primitive_plain::Encoder::new(
+            block_size, nullable,
+        ))),
+        _ => Err(anyhow!("invalid encoder for i32 data {:?}", encoder)),
+    }
 }
 
 pub fn new_i64_encoder<S>(
-    encoder: String,
-    block_size: u32,
+    encoder: Encoding,
+    block_size: usize,
+    nullable: bool,
 ) -> Result<Box<dyn BlockEncoder<Int64Buffer, S>>>
 where
-    S: BlockSink,
+    S: BlockSink + Send,
 {
-    todo!()
+    match encoder {
+        Encoding::Plain => Ok(Box::new(primitive_plain::Encoder::new(
+            block_size, nullable,
+        ))),
+        _ => Err(anyhow!("invalid encoder for i64 data {:?}", encoder)),
+    }
 }
 
 pub fn new_u64_encoder<S>(
-    encoder: String,
-    block_size: u32,
+    encoder: Encoding,
+    block_size: usize,
+    nullable: bool,
 ) -> Result<Box<dyn BlockEncoder<Uint64Buffer, S>>>
 where
-    S: BlockSink,
+    S: BlockSink + Send,
 {
-    todo!()
+    match encoder {
+        Encoding::Plain => Ok(Box::new(primitive_plain::Encoder::new(
+            block_size, nullable,
+        ))),
+        _ => Err(anyhow!("invalid encoder for u64 data {:?}", encoder)),
+    }
 }
 
 pub fn new_f64_encoder<S>(
@@ -92,5 +110,37 @@ where
         Encoding::Snappy => Ok(Box::new(SnappyEncoder::new(block_size, nullable))),
         Encoding::Plain => Ok(Box::new(binary_plain::Encoder::new(block_size, nullable))),
         _ => Err(anyhow!("invalid encoder for binary data {:?}", encoder)),
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[derive(Debug)]
+    pub struct CapturedBlock {
+        row_id: u32,
+        block_data: Vec<u8>,
+    }
+
+    pub struct SinkMock {
+        pub blocks: Vec<CapturedBlock>,
+    }
+
+    impl SinkMock {
+        pub fn new() -> Self {
+            Self { blocks: Vec::new() }
+        }
+    }
+
+    #[async_trait]
+    impl BlockSink for SinkMock {
+        async fn write_block(&mut self, row_id: u32, block_data: &[u8]) -> Result<()> {
+            self.blocks.push(CapturedBlock {
+                row_id: row_id,
+                block_data: Vec::from(block_data),
+            });
+            Ok(())
+        }
     }
 }

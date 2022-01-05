@@ -11,7 +11,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
 use std::path::PathBuf;
 
 use structopt::clap::AppSettings;
@@ -19,8 +18,8 @@ use structopt::StructOpt;
 
 use server::Config;
 
-mod server;
 mod build;
+mod server;
 mod store;
 
 #[derive(Debug, StructOpt)]
@@ -37,13 +36,11 @@ struct Args {
     seeds: Option<String>,
 }
 
-
 const NO_VERSION_HELP_TEMPLATE: &str = "
 USAGE:
     {usage}
 
 {all-args}";
-
 
 fn main() {
     println!("meerkat {}", build::short_info());
@@ -60,7 +57,12 @@ fn main() {
     let conf = Config {
         db_path: args.db_path,
         gossip_port: args.gossip_port,
-        seeds: args.seeds.unwrap_or_default().split(',').map(|s| s.trim().to_string()).collect(),
+        seeds: args
+            .seeds
+            .unwrap_or_default()
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .collect(),
     };
 
     let mut server = server::Meerkat::new(conf);

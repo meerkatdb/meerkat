@@ -13,7 +13,7 @@
 
 use std::path::PathBuf;
 
-use tracing::{info, Level, span};
+use tracing::{info, span, Level};
 use tracing_log::LogTracer;
 use tracing_subscriber::layer::SubscriberExt;
 
@@ -28,8 +28,7 @@ pub struct Meerkat {
     conf: Config,
 }
 
-impl Meerkat
-{
+impl Meerkat {
     pub fn new(conf: Config) -> Self {
         Self { conf }
     }
@@ -56,7 +55,3 @@ impl Meerkat
             .expect("setting tracing default failed");
     }
 }
-
-
-
-
