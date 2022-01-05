@@ -26,13 +26,14 @@ use std::ops::Range;
 use anyhow::Result;
 use async_trait::async_trait;
 use bitpacking::{BitPacker, BitPacker4x};
+use itertools::Itertools;
 use tokio::test;
 
 use crate::store::block_encoders::bitmap_rle;
 use crate::store::block_encoders::offsets::OffsetEncoder;
 use crate::store::block_encoders::util::ceil8;
 use crate::store::block_encoders::{BlockEncoder, BlockSink};
-use crate::store::indexing_buffer::{BinaryBuffer, BinaryChunk, Bitmap};
+use crate::store::indexing_buffer::{BinaryBuffer, Bitmap};
 use crate::store::segment_metadata::column_layout::EncoderLayout;
 use crate::store::segment_metadata::NoLayout;
 
@@ -132,9 +133,11 @@ impl<S: BlockSink + Send> BlockEncoder<BinaryBuffer, S> for Encoder {
         if self.remaining.len() > 0 {
             let remaining_size = self.remaining.data().len();
 
-            let chunk = buffer.chunk(0, self.min_block_size - remaining_size as u64);
+            let chunk = chunk(buffer, 0, self.min_block_size - remaining_size as u64);
 
-            validity_pos = self.remaining.append_from(buffer, &chunk, 0);
+            validity_pos = self
+                .remaining
+                .append_from(buffer, chunk.start_pos, chunk.end_pos, 0);
             buf_pos = chunk.end_pos;
 
             if self.remaining.data().len() < self.min_block_size as usize {
@@ -147,9 +150,10 @@ impl<S: BlockSink + Send> BlockEncoder<BinaryBuffer, S> for Encoder {
         }
 
         while buf_pos < buffer.offsets().len() {
-            let chunk = buffer.chunk(buf_pos, self.min_block_size);
+            let chunk = chunk(&buffer, buf_pos, self.min_block_size);
             if (chunk.size as u64) < self.min_block_size {
-                self.remaining.append_from(buffer, &chunk, validity_pos);
+                self.remaining
+                    .append_from(buffer, chunk.start_pos, chunk.end_pos, validity_pos);
                 return Ok(());
             }
 
@@ -217,6 +221,41 @@ fn encode_binary_buffer(
             num_rows: chunk.len,
             last_validity_pos: 0,
         },
+    }
+}
+
+#[derive(Debug)]
+pub struct BinaryChunk {
+    pub start_pos: usize,
+    pub end_pos: usize,
+    pub start_offset: u32,
+    pub end_offset: u32,
+    pub size: u32,
+    pub len: usize,
+}
+
+pub fn chunk(buffer: &BinaryBuffer, start_pos: usize, min_size: u64) -> BinaryChunk {
+    let start_offset = buffer.offsets()[start_pos];
+
+    let maybe_end_pos = buffer.offsets()[start_pos..]
+        .iter()
+        .find_position(|offset| (*offset - start_offset) as u64 >= min_size);
+
+    let (end_pos, end_offset) = match maybe_end_pos {
+        Some(pos) => (pos.0, *pos.1),
+        None => (
+            buffer.offsets().len() - 1,
+            buffer.offsets()[buffer.offsets().len() - 1],
+        ),
+    };
+
+    BinaryChunk {
+        start_pos,
+        end_pos,
+        start_offset,
+        end_offset,
+        size: end_offset - start_offset,
+        len: end_pos - start_pos,
     }
 }
 
